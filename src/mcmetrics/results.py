@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 import scipy.stats as st
@@ -106,26 +106,8 @@ class OLSResults:
     # Monte Carlo truth (optional)
     beta_true: Optional[torch.Tensor] = None  # expected shape (k,) or broadcastable variants
 
-    @property
-    def nobs(self) -> int:
-        return int(self._nobs)
-
-    @property
-    def R(self) -> int:
-        return int(self.params.shape[0])
-
-    @property
-    def k(self) -> int:
-        return int(self.params.shape[1])
-
-    @property
-    def stderr(self) -> torch.Tensor:
-        return torch.sqrt(torch.diagonal(self.vcov, dim1=-2, dim2=-1))
-
-    @property
-    def statvalues(self) -> torch.Tensor:
-        """t-stats or z-stats, depending on use_t."""
-        return self.params / self.stderr
+    # Extra diagnostics / model-specific info (optional)
+    extras: Optional[dict[str, Any]] = None
 
     def predict(
         self,
@@ -223,7 +205,6 @@ class OLSResults:
         - "median": use median(params) across replications
         """
         return self.predict(X, params=params)
-
 
     def get_resid(
         self,
@@ -596,97 +577,61 @@ class OLSResults:
 
         return _from_numpy(p_np, ref=s)
 
-    @property
-    def pvalues(self) -> torch.Tensor:
+    def at(self, r: int) -> OLSResults:
+        """Return a single-replication view as an OLSResults with R=1.
+
+        Example
+        --------
+        >>> res = WLS(X, y, weights=1.0, vcov='HC1', store_y=True)
+        >>> res0 = res.at(0)
+        >>> res0.params.shape
+        (1, k)
+        >>> res0.vcov.shape
+        (1, k, k)
+        >>> print(res0.summary())
+        ...
         """
-        Two-sided p-values computed via SciPy.
+        R = self.R
+        if not (0 <= r < R):
+            raise ValueError(f"r must be in [0,{R-1}]. Got {r}.")
 
-        - If use_t=True: Student-t(df_resid)
-        - If use_t=False: Normal(0,1) (z-test)
-        """
-        return self._pvalues_from_stat(self.statvalues, use_t=self.use_t)
+        def _slice_opt(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+            if x is None:
+                return None
+            return x[r : r + 1]
 
-    @property
-    def tss(self) -> Optional[torch.Tensor]:
-        """Total sum of squares (R,). Requires y to be stored."""
-        if self.y is None:
-            return None
-        if self.has_const:
-            ybar = self.y.mean(dim=1, keepdim=True)
-            return ((self.y - ybar) ** 2).sum(dim=1)
-        return (self.y ** 2).sum(dim=1)
+        def _slice_extras(extras: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+            if extras is None:
+                return None
+            out: dict[str, Any] = {}
+            for k, v in extras.items():
+                if isinstance(v, torch.Tensor) and v.ndim >= 1 and v.shape[0] == R:
+                    out[k] = v[r : r + 1]
+                else:
+                    out[k] = v
+            return out
 
-    @property
-    def rsquared(self) -> Optional[torch.Tensor]:
-        tss = self.tss
-        if tss is None:
-            return None
-        return 1.0 - self.ssr / tss
-
-    @property
-    def adj_rsquared(self) -> Optional[torch.Tensor]:
-        r2 = self.rsquared
-        if r2 is None:
-            return None
-        n = float(self.nobs)
-        if self.has_const:
-            return 1.0 - (1.0 - r2) * (n - 1.0) / float(self.df_resid)
-        return 1.0 - (1.0 - r2) * n / float(self.df_resid)
-
-    @property
-    def fvalue(self) -> Optional[torch.Tensor]:
-        """
-        Global F-test for slopes = 0 (excluding constant if has_const).
-        Requires y to compute TSS (and hence ESS).
-        """
-        tss = self.tss
-        if tss is None or self.df_model <= 0:
-            return None
-        ess = tss - self.ssr
-        msr = ess / float(self.df_model)
-        mse = self.ssr / float(self.df_resid)
-        return msr / mse
-
-    @property
-    def f_pvalue(self) -> Optional[torch.Tensor]:
-        f = self.fvalue
-        if f is None:
-            return None
-        f_np = _to_numpy(f)
-        p_np = st.f.sf(f_np, dfn=self.df_model, dfd=self.df_resid)
-        return _from_numpy(p_np, ref=f)
-
-    @property
-    def llf(self) -> torch.Tensor:
-        """
-        Gaussian log-likelihood under homoskedastic normal errors.
-        Uses sigma2_mle = SSR / n (statsmodels-style).
-        Returns (R,).
-        """
-        n = float(self.nobs)
-        sigma2_mle = self.ssr / n
-        return -0.5 * n * (torch.log(2.0 * torch.pi * sigma2_mle) + 1.0)
-
-    @property
-    def aic(self) -> torch.Tensor:
-        return -2.0 * self.llf + 2.0 * float(self.k)
-
-    @property
-    def bic(self) -> torch.Tensor:
-        return -2.0 * self.llf + np.log(float(self.nobs)) * float(self.k)
-
-    @property
-    def durbin_watson(self) -> Optional[torch.Tensor]:
-        """
-        Durbin-Watson per replication (R,).
-        Requires resid to be stored; otherwise returns None.
-        """
-        if self.resid is None:
-            return None
-        if self.nobs < 2:
-            return None
-        de = self.resid[:, 1:] - self.resid[:, :-1]
-        return (de ** 2).sum(dim=1) / self.ssr
+        return OLSResults(
+            params=self.params[r : r + 1],
+            vcov=self.vcov[r : r + 1],
+            sigma2=self.sigma2[r : r + 1],
+            ssr=self.ssr[r : r + 1],
+            _nobs=self._nobs,
+            df_resid=self.df_resid,
+            df_model=self.df_model,
+            has_const=self.has_const,
+            fitted=_slice_opt(self.fitted),
+            resid=_slice_opt(self.resid),
+            y=_slice_opt(self.y),
+            model_name=self.model_name,
+            method_name=self.method_name,
+            cov_type=self.cov_type,
+            backend=self.backend,
+            param_names=self.param_names,
+            use_t=self.use_t,
+            beta_true=self.beta_true,
+            extras=_slice_extras(self.extras),
+        )
 
     def conf_int(self, alpha: float = 0.05, use_t: Optional[bool] = None) -> torch.Tensor:
         """
@@ -845,6 +790,141 @@ class OLSResults:
         pval = _from_numpy(p_np, ref=W)
         rej = pval < alpha
         return {"stat": stat, "pval": pval, "rej": rej}
+
+
+    @property
+    def nobs(self) -> int:
+        return int(self._nobs)
+
+    @property
+    def R(self) -> int:
+        return int(self.params.shape[0])
+
+    @property
+    def k(self) -> int:
+        return int(self.params.shape[1])
+
+    @property
+    def stderr(self) -> torch.Tensor:
+        return torch.sqrt(torch.diagonal(self.vcov, dim1=-2, dim2=-1))
+
+    @property
+    def statvalues(self) -> torch.Tensor:
+        """t-stats or z-stats, depending on use_t."""
+        return self.params / self.stderr
+
+    @property
+    def pvalues(self) -> torch.Tensor:
+        """
+        Two-sided p-values computed via SciPy.
+
+        - If use_t=True: Student-t(df_resid)
+        - If use_t=False: Normal(0,1) (z-test)
+        """
+        return self._pvalues_from_stat(self.statvalues, use_t=self.use_t)
+
+    @property
+    def tss(self) -> Optional[torch.Tensor]:
+        """Total sum of squares (R,).
+        Requires y to be stored, unless a model-specific TSS is provided in extras.
+        """
+        # If a model provided a custom TSS (e.g. weighted TSS), prefer it.
+        if self.extras is not None and "tss_weighted" in self.extras:
+            tw = self.extras["tss_weighted"]
+            if isinstance(tw, torch.Tensor):
+                return tw
+
+        if self.y is None:
+            return None
+
+        if self.has_const:
+            ybar = self.y.mean(dim=1, keepdim=True)
+            return ((self.y - ybar) ** 2).sum(dim=1)
+        return (self.y ** 2).sum(dim=1)
+
+    @property
+    def rsquared(self) -> Optional[torch.Tensor]:
+        # If model provided a custom R^2 (e.g. weighted), prefer it.
+        if self.extras is not None and "rsquared_weighted" in self.extras:
+            r2w = self.extras["rsquared_weighted"]
+            if isinstance(r2w, torch.Tensor):
+                return r2w
+
+        tss = self.tss
+        if tss is None:
+            return None
+        return 1.0 - self.ssr / tss
+
+    @property
+    def adj_rsquared(self) -> Optional[torch.Tensor]:
+        # If model provided a custom adjusted R^2 (e.g. weighted), prefer it.
+        if self.extras is not None and "adj_rsquared_weighted" in self.extras:
+            ar2w = self.extras["adj_rsquared_weighted"]
+            if isinstance(ar2w, torch.Tensor):
+                return ar2w
+
+        r2 = self.rsquared
+        if r2 is None:
+            return None
+        n = float(self.nobs)
+        if self.has_const:
+            return 1.0 - (1.0 - r2) * (n - 1.0) / float(self.df_resid)
+        return 1.0 - (1.0 - r2) * n / float(self.df_resid)
+    
+    @property
+    def fvalue(self) -> Optional[torch.Tensor]:
+        """
+        Global F-test for slopes = 0 (excluding constant if has_const).
+        Requires y to compute TSS (and hence ESS).
+        """
+        tss = self.tss
+        if tss is None or self.df_model <= 0:
+            return None
+        ess = tss - self.ssr
+        msr = ess / float(self.df_model)
+        mse = self.ssr / float(self.df_resid)
+        return msr / mse
+
+    @property
+    def f_pvalue(self) -> Optional[torch.Tensor]:
+        f = self.fvalue
+        if f is None:
+            return None
+        f_np = _to_numpy(f)
+        p_np = st.f.sf(f_np, dfn=self.df_model, dfd=self.df_resid)
+        return _from_numpy(p_np, ref=f)
+
+    @property
+    def llf(self) -> torch.Tensor:
+        """
+        Gaussian log-likelihood under homoskedastic normal errors.
+        Uses sigma2_mle = SSR / n (statsmodels-style).
+        Returns (R,).
+        """
+        n = float(self.nobs)
+        sigma2_mle = self.ssr / n
+        return -0.5 * n * (torch.log(2.0 * torch.pi * sigma2_mle) + 1.0)
+
+    @property
+    def aic(self) -> torch.Tensor:
+        return -2.0 * self.llf + 2.0 * float(self.k)
+
+    @property
+    def bic(self) -> torch.Tensor:
+        return -2.0 * self.llf + np.log(float(self.nobs)) * float(self.k)
+
+    @property
+    def durbin_watson(self) -> Optional[torch.Tensor]:
+        """
+        Durbin-Watson per replication (R,).
+        Requires resid to be stored; otherwise returns None.
+        """
+        if self.resid is None:
+            return None
+        if self.nobs < 2:
+            return None
+        de = self.resid[:, 1:] - self.resid[:, :-1]
+        return (de ** 2).sum(dim=1) / self.ssr
 
     # --------------------------
     # Summary (MC-friendly)
