@@ -7,10 +7,10 @@ from mcmetrics.exceptions import ShapeError
 
 def vcov_classic(XtX_inv: torch.Tensor, sigma2: torch.Tensor) -> torch.Tensor:
     """
-    Classic (homoskedastic) variance-covariance matrix.
+    Classic (homoskedastic) vcov.
 
     XtX_inv : (R,k,k)
-    sigma2  : (R,) or scalar tensor
+    sigma2  : (R,) or scalar
     """
     if XtX_inv.ndim != 3 or XtX_inv.shape[-1] != XtX_inv.shape[-2]:
         raise ShapeError(f"XtX_inv must be (R,k,k). Got {tuple(XtX_inv.shape)}")

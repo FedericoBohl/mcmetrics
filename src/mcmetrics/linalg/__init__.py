@@ -1,23 +1,8 @@
-\
-"""
-mcmetrics.linalg
+from __future__ import annotations
 
-Low-level linear algebra utilities for batched econometrics.
-
-Conventions
------------
-- Replication axis: R
-- Observation axis: n
-- Parameter axis: k
-
-Shapes
-------
-- X: (R, n, k)
-- y: (R, n)
-"""
-from .solve import SolveMethod, solve_ls
-from .chol import safe_cholesky, chol_inverse, chol_solve
+from .chol import chol_inverse, chol_solve, safe_cholesky
 from .einsum import einsum
+from .solve import SolveMethod, solve_ls
 
 __all__ = [
     "SolveMethod",

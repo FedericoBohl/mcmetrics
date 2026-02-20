@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal, Optional, Union
+
 import torch
 
 from mcmetrics.exceptions import ShapeError
@@ -33,14 +34,6 @@ def OLS(
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ) -> OLSResults:
-    """
-    Batched OLS for Monte Carlo replications with memory-light defaults.
-
-    Inputs
-    ------
-    - X: (R,n,k) or (n,k) or pandas.DataFrame (single sample)
-    - y: (R,n) or (n,) or pandas.Series / 1-col DataFrame (single sample)
-    """
     X, y, param_names = as_batched_xy(X, y, dtype=dtype, device=device)
     R, n, k = X.shape
 
@@ -50,11 +43,11 @@ def OLS(
 
     beta, XtX, XtX_inv = solve_ls(X, y, solve_method=solve_method)
 
-    fitted = (X @ beta.unsqueeze(-1)).squeeze(-1)  # (R,n)
-    resid = y - fitted  # (R,n)
+    fitted = (X @ beta.unsqueeze(-1)).squeeze(-1)
+    resid = y - fitted
 
-    ssr = (resid * resid).sum(dim=1)  # (R,)
-    sigma2 = ssr / float(df_resid)  # (R,)
+    ssr = (resid * resid).sum(dim=1)
+    sigma2 = ssr / float(df_resid)
 
     df_model = (k - 1) if has_const else k
     if df_model <= 0:

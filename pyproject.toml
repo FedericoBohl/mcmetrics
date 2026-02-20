@@ -9,9 +9,7 @@ description = "Fast batched econometrics (OLS/WLS/GLS/FGLS) for Monte Carlo simu
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-authors = [
-  { name = "Federico Bohl" }
-]
+authors = [{ name = "Federico Bohl" }]
 keywords = ["econometrics", "monte-carlo", "ols", "gls", "fgls", "jax", "numpy"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -19,9 +17,8 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Mathematics",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3 :: Only"
+  "Programming Language :: Python :: 3 :: Only",
 ]
-
 dependencies = [
   "numpy>=1.26.4",
   "torch>=2.1",
@@ -31,24 +28,10 @@ dependencies = [
 [project.optional-dependencies]
 pandas = ["pandas>=3.0.0"]
 plots = ["matplotlib>=3.8"]
-all = [
-  "pandas>=3.0.0",
-  "matplotlib>=3.8",
-]
-
-# Backend acelerado (CPU/GPU) - lo dejás opcional para no forzar a todo el mundo a instalarlo
+all = ["pandas>=3.0.0", "matplotlib>=3.8"]
 jax = ["jax>=0.4.20", "jaxlib>=0.4.20"]
-
-# Backend alternativo (sobre todo por GPU/ecosistema ML)
 torch = ["torch>=2.1"]
-
-# Herramientas para desarrollo local (tests, lint)
-dev = [
-  "pytest>=8.0",
-  "pytest-cov>=4.1",
-  "ruff>=0.4",
-  "mypy>=1.8"
-]
+dev = ["pytest>=8.0", "pytest-cov>=4.1", "ruff>=0.4", "mypy>=1.8"]
 
 [project.urls]
 Homepage = "https://github.com/FedericoBohl/mcmetrics"
@@ -56,7 +39,7 @@ Repository = "https://github.com/FedericoBohl/mcmetrics"
 Issues = "https://github.com/FedericoBohl/mcmetrics/issues"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -66,8 +49,9 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.ruff]
-line-length = 100
-target-version = "py310"
+line-length = 120
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = ["E741"]

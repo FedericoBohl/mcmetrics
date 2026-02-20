@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence, Tuple, Union, TYPE_CHECKING
+from typing import Any, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
 
-from mcmetrics.exceptions import ShapeError, NotSupportedError
-
-if TYPE_CHECKING:  # pragma: no cover
-    import pandas as pd
+from mcmetrics.exceptions import NotSupportedError, ShapeError
 
 ArrayLike = Union[torch.Tensor, np.ndarray, Sequence[Any]]
 
@@ -33,9 +30,7 @@ def _require_pandas() -> None:
     try:
         import pandas as _  # noqa: F401
     except Exception as e:
-        raise NotSupportedError(
-            "pandas is required to pass DataFrame/Series inputs. Install with: pip install pandas"
-        ) from e
+        raise NotSupportedError("pandas is required to pass DataFrame/Series inputs. Install with: pip install pandas") from e
 
 
 def as_torch(
@@ -115,7 +110,6 @@ def as_batched_xy(
     if Xt.shape[0] != yt.shape[0] or Xt.shape[1] != yt.shape[1]:
         raise ShapeError(f"Batch/obs dims mismatch: X {tuple(Xt.shape)}, y {tuple(yt.shape)}")
 
-    # If batched input (R>1) we do not trust column names even if origin was a DataFrame
     if Xt.shape[0] != 1:
         param_names = None
 

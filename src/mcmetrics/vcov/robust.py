@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from typing import Literal
+
 import torch
 
-from mcmetrics.exceptions import ShapeError, NotSupportedError, SingularMatrixError
+from mcmetrics.exceptions import NotSupportedError, ShapeError
 
 
 def _check_shapes(X: torch.Tensor, resid: torch.Tensor) -> None:
@@ -16,14 +17,8 @@ def _check_shapes(X: torch.Tensor, resid: torch.Tensor) -> None:
 
 
 def meat_white(X: torch.Tensor, resid: torch.Tensor) -> torch.Tensor:
-    """
-    White "meat" term: X' diag(e^2) X, batched over R.
-
-    X : (R,n,k)
-    resid : (R,n)
-    """
     _check_shapes(X, resid)
-    e2 = resid * resid  # (R,n)
+    e2 = resid * resid
     return torch.einsum("rni,rn,rnj->rij", X, e2, X)
 
 
@@ -37,7 +32,7 @@ def vcov_hc0(X: torch.Tensor, resid: torch.Tensor, XtX_inv: torch.Tensor) -> tor
 
 def vcov_hc1(X: torch.Tensor, resid: torch.Tensor, XtX_inv: torch.Tensor) -> torch.Tensor:
     _check_shapes(X, resid)
-    R, n, k = X.shape
+    _, n, k = X.shape
     df_resid = n - k
     if df_resid <= 0:
         raise ShapeError(f"Need n > k for HC1 scaling. Got n={n}, k={k}.")
@@ -73,6 +68,7 @@ def vcov_cluster(
     _check_shapes(X, resid)
     if XtX_inv.ndim != 3:
         raise ShapeError(f"XtX_inv must be (R,k,k). Got {tuple(XtX_inv.shape)}")
+
     R, n, k = X.shape
     inv, G = _coerce_clusters(clusters, n=n, device=X.device)
     if G <= 1:
@@ -83,7 +79,7 @@ def vcov_cluster(
     idx = inv.view(1, n, 1).expand(R, n, k)
     S.scatter_add_(1, idx, Xe)
 
-    meat = torch.einsum("rgk,rgl->rkl", S, S)  # (R,k,k)
+    meat = torch.einsum("rgk,rgl->rkl", S, S)
     vc = XtX_inv @ meat @ XtX_inv
 
     if correction == "CR1":
@@ -112,16 +108,16 @@ def vcov_hac(
     if kernel != "bartlett":
         raise NotSupportedError("Only kernel='bartlett' is currently supported")
 
-    R, n, k = X.shape
+    _, n, _ = X.shape
     L = int(max(0, min(max_lags, n - 1)))
 
-    Xe = X * resid.unsqueeze(-1)  # (R,n,k)
-    meat = torch.einsum("rnk,rnl->rkl", Xe, Xe)  # Gamma_0
+    Xe = X * resid.unsqueeze(-1)
+    meat = torch.einsum("rnk,rnl->rkl", Xe, Xe)
 
-    for l in range(1, L + 1):
-        w = 1.0 - float(l) / float(L + 1)
-        A = Xe[:, l:, :]      # (R,n-l,k)
-        B = Xe[:, :-l, :]     # (R,n-l,k)
+    for lag in range(1, L + 1):
+        w = 1.0 - float(lag) / float(L + 1)
+        A = Xe[:, lag:, :]
+        B = Xe[:, :-lag, :]
         Gamma = torch.einsum("rnk,rnl->rkl", A, B)
         meat = meat + w * (Gamma + Gamma.transpose(-1, -2))
 

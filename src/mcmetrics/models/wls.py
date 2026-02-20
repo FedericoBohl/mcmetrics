@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal, Optional, Union
+
 import torch
 
 from mcmetrics.exceptions import ShapeError
@@ -37,14 +38,6 @@ def WLS(
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ) -> OLSResults:
-    """
-    Batched WLS for Monte Carlo replications.
-
-    weights are interpreted (by default) as precision weights:
-        w_i ∝ 1 / Var(u_i | X)
-
-    Internally solves the transformed system with sqrt(w).
-    """
     X, y, param_names = as_batched_xy(X, y, dtype=dtype, device=device)
     R, n, k = X.shape
 
@@ -62,22 +55,22 @@ def WLS(
         check=check_weights,
     )
 
-    Xw = X * sqrt_w.unsqueeze(-1)  # (R,n,k)
-    yw = y * sqrt_w                # (R,n)
+    Xw = X * sqrt_w.unsqueeze(-1)
+    yw = y * sqrt_w
 
     beta, XtX, XtX_inv = solve_ls(Xw, yw, solve_method=solve_method)
 
-    fitted = (X @ beta.unsqueeze(-1)).squeeze(-1)  # (R,n) fitted on original scale
-    resid = y - fitted  # (R,n)
+    fitted = (X @ beta.unsqueeze(-1)).squeeze(-1)
+    resid = y - fitted
 
-    wrss = (w * resid * resid).sum(dim=1)  # (R,)
-    sigma2 = wrss / float(df_resid)        # (R,) variance in transformed equation
+    wrss = (w * resid * resid).sum(dim=1)
+    sigma2 = wrss / float(df_resid)
 
     df_model = (k - 1) if has_const else k
     if df_model <= 0:
         df_model = k
 
-    resid_w = resid * sqrt_w  # (R,n)
+    resid_w = resid * sqrt_w
 
     vcov_key = vcov.upper() if vcov != "classic" else "CLASSIC"
 
@@ -141,7 +134,7 @@ def WLS(
         params=beta,
         vcov=vcov_mat,
         sigma2=sigma2,
-        ssr=wrss,  # weighted SSR
+        ssr=wrss,
         _nobs=n,
         df_resid=df_resid,
         df_model=df_model,

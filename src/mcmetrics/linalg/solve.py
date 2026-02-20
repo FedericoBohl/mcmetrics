@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from typing import Literal, Tuple
+
 import torch
 
 from mcmetrics.exceptions import ShapeError
-from .chol import safe_cholesky, chol_inverse, chol_solve
+from mcmetrics.linalg.chol import chol_inverse, chol_solve, safe_cholesky
 
 SolveMethod = Literal["solve", "lstsq", "cholesky", "qr"]
 
@@ -35,22 +36,22 @@ def solve_ls(
     if X.shape[0] != y.shape[0] or X.shape[1] != y.shape[1]:
         raise ShapeError(f"Batch/obs dims mismatch: X {tuple(X.shape)}, y {tuple(y.shape)}")
 
-    R, n, k = X.shape
+    R, _, k = X.shape
 
     if solve_method == "qr":
-        Q, Rm = torch.linalg.qr(X, mode="reduced")  # Q:(R,n,k), Rm:(R,k,k)
-        Qt_y = torch.einsum("rnk,rn->rk", Q, y)     # (R,k)
+        Q, Rm = torch.linalg.qr(X, mode="reduced")
+        Qt_y = torch.einsum("rnk,rn->rk", Q, y)
         beta = torch.linalg.solve(Rm, Qt_y.unsqueeze(-1)).squeeze(-1)
 
-        I = _batched_eye(k, R, X)
-        invR = torch.linalg.solve_triangular(Rm, I, upper=True)
+        eye = _batched_eye(k, R, X)
+        invR = torch.linalg.solve_triangular(Rm, eye, upper=True)
         XtX_inv = invR @ invR.transpose(-1, -2)
         XtX = Rm.transpose(-1, -2) @ Rm
         return beta, XtX, XtX_inv
 
-    Xt = X.transpose(1, 2)        # (R,k,n)
-    XtX = Xt @ X                  # (R,k,k)
-    Xty = Xt @ y.unsqueeze(-1)    # (R,k,1)
+    Xt = X.transpose(1, 2)
+    XtX = Xt @ X
+    Xty = Xt @ y.unsqueeze(-1)
 
     if solve_method == "solve":
         beta = torch.linalg.solve(XtX, Xty).squeeze(-1)
@@ -58,7 +59,6 @@ def solve_ls(
         return beta, XtX, XtX_inv
 
     if solve_method == "lstsq":
-        # NOTE: solve beta from the original LS (not from normal equations).
         beta = torch.linalg.lstsq(X, y.unsqueeze(-1)).solution.squeeze(-1)
         XtX_inv = torch.linalg.solve(XtX, _batched_eye(k, R, X))
         return beta, XtX, XtX_inv

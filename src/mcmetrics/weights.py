@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal, Optional, Union
 import warnings
+from typing import Literal, Optional, Union
+
 import torch
 
 from mcmetrics.exceptions import InvalidWeightsError, ShapeError
@@ -26,24 +27,14 @@ def as_batched_weights(
       - scalar
       - (n,)
       - (R,n)
-
-    mode:
-      - "precision"      : w = 1/Var(u_i)
-      - "variance"       : v = Var(u_i) (converted to w=1/v)
-      - "sqrt_precision" : s = sqrt(w)
-      - "sqrt_variance"  : s = sqrt(v) (converted to w=1/s^2)
     """
-    if isinstance(weights, torch.Tensor):
-        w = weights
-    else:
-        w = torch.as_tensor(weights)
+    w = weights if isinstance(weights, torch.Tensor) else torch.as_tensor(weights)
 
     if dtype is not None:
         w = w.to(dtype=dtype)
     if device is not None:
         w = w.to(device=device)
 
-    # Shape to (R,n)
     if w.ndim == 0:
         w = w.view(1, 1).expand(R, n)
     elif w.ndim == 1:
@@ -56,7 +47,6 @@ def as_batched_weights(
     else:
         raise ShapeError(f"weights must be scalar, (n,), or (R,n). Got {tuple(w.shape)}")
 
-    # Convert to precision weights
     if mode == "precision":
         w_prec = w
     elif mode == "variance":
@@ -76,9 +66,6 @@ def as_batched_weights(
 
         wmin = float(w_prec.min().detach().cpu().item())
         wmax = float(w_prec.max().detach().cpu().item())
-        if wmin <= 0:
-            raise InvalidWeightsError("weights must be strictly positive")
-
         ratio = wmax / wmin
         if ratio > 1e8:
             warnings.warn(
