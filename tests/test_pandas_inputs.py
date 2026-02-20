@@ -1,4 +1,3 @@
-\
 import pytest
 
 pd = pytest.importorskip("pandas")
