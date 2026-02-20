@@ -1,12 +1,10 @@
-# src/mcmetrics/weights.py
 from __future__ import annotations
 
 from typing import Literal, Optional, Union
-
 import warnings
-
 import torch
 
+from mcmetrics.exceptions import InvalidWeightsError, ShapeError
 
 WeightsMode = Literal["precision", "variance", "sqrt_precision", "sqrt_variance"]
 
@@ -21,22 +19,19 @@ def as_batched_weights(
     device: Optional[Union[str, torch.device]] = None,
     check: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Coerce weights to (R,n) precision weights and return (w, sqrt_w).
+    """
+    Coerce weights to (R,n) precision weights and return (w, sqrt_w).
 
-    Accepted inputs
-    - scalar
-    - (n,)
-    - (R,n)
+    Accepted inputs:
+      - scalar
+      - (n,)
+      - (R,n)
 
-    mode
-    - "precision"       : w = 1/Var(u_i) (standard WLS input)
-    - "variance"        : v = Var(u_i)   (we convert to w=1/v)
-    - "sqrt_precision"  : s = sqrt(w)
-    - "sqrt_variance"   : s = sqrt(v) (we convert to w = 1/s^2)
-
-    Returns
-    - w      : (R,n) precision weights
-    - sqrt_w : (R,n) elementwise sqrt(w)
+    mode:
+      - "precision"      : w = 1/Var(u_i)
+      - "variance"       : v = Var(u_i) (converted to w=1/v)
+      - "sqrt_precision" : s = sqrt(w)
+      - "sqrt_variance"  : s = sqrt(v) (converted to w=1/s^2)
     """
     if isinstance(weights, torch.Tensor):
         w = weights
@@ -53,13 +48,13 @@ def as_batched_weights(
         w = w.view(1, 1).expand(R, n)
     elif w.ndim == 1:
         if int(w.shape[0]) != n:
-            raise ValueError(f"weights has shape {tuple(w.shape)} but n={n}")
+            raise ShapeError(f"weights has shape {tuple(w.shape)} but n={n}")
         w = w.view(1, n).expand(R, n)
     elif w.ndim == 2:
         if tuple(w.shape) != (R, n):
-            raise ValueError(f"weights must be (R,n)={(R,n)}. Got {tuple(w.shape)}")
+            raise ShapeError(f"weights must be (R,n)={(R,n)}. Got {tuple(w.shape)}")
     else:
-        raise ValueError(f"weights must be scalar, (n,), or (R,n). Got {tuple(w.shape)}")
+        raise ShapeError(f"weights must be scalar, (n,), or (R,n). Got {tuple(w.shape)}")
 
     # Convert to precision weights
     if mode == "precision":
@@ -71,23 +66,23 @@ def as_batched_weights(
     elif mode == "sqrt_variance":
         w_prec = 1.0 / (w * w)
     else:
-        raise ValueError("mode must be one of {'precision','variance','sqrt_precision','sqrt_variance'}")
+        raise ShapeError("mode must be one of {'precision','variance','sqrt_precision','sqrt_variance'}")
 
     if check:
         if not torch.isfinite(w_prec).all():
-            raise ValueError("weights contain inf/nan after coercion")
+            raise InvalidWeightsError("weights contain inf/nan after coercion")
         if (w_prec <= 0).any():
-            raise ValueError("weights must be strictly positive")
+            raise InvalidWeightsError("weights must be strictly positive")
 
         wmin = float(w_prec.min().detach().cpu().item())
         wmax = float(w_prec.max().detach().cpu().item())
         if wmin <= 0:
-            raise ValueError("weights must be strictly positive")
+            raise InvalidWeightsError("weights must be strictly positive")
+
         ratio = wmax / wmin
         if ratio > 1e8:
             warnings.warn(
-                f"Very large weight ratio max/min = {ratio:.2e}. "
-                "This can cause numerical issues.",
+                f"Very large weight ratio max/min = {ratio:.2e}. This can cause numerical issues.",
                 RuntimeWarning,
                 stacklevel=2,
             )

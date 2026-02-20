@@ -1,64 +1,18 @@
-# src/mcmetrics/models/wls.py
 from __future__ import annotations
 
 from typing import Literal, Optional, Union
-
 import torch
 
+from mcmetrics.exceptions import ShapeError
+from mcmetrics.linalg import solve_ls
 from mcmetrics.results import OLSResults
 from mcmetrics.typing import as_batched_xy
+from mcmetrics.vcov.classic import vcov_classic
 from mcmetrics.vcov.robust import vcov_cluster, vcov_hac, vcov_hc0, vcov_hc1
 from mcmetrics.weights import WeightsMode, as_batched_weights
 
 SolveMethod = Literal["solve", "lstsq", "cholesky", "qr"]
 VcovType = Literal["classic", "HC0", "HC1", "cluster", "HAC"]
-
-
-def _solve_ls(
-    X: torch.Tensor,
-    y: torch.Tensor,
-    *,
-    solve_method: SolveMethod,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Solve LS for each replication.
-
-    Inputs
-    - X: (R,n,k)
-    - y: (R,n)
-
-    Returns
-    - beta: (R,k)
-    - XtX:  (R,k,k)
-    - XtX_inv: (R,k,k)
-    """
-    R, n, k = X.shape
-
-    if solve_method == "qr":
-        Q, Rm = torch.linalg.qr(X, mode="reduced")
-        Qt_y = torch.einsum("rnk,rn->rk", Q, y)
-        beta = torch.linalg.solve(Rm, Qt_y.unsqueeze(-1)).squeeze(-1)
-        XtX = Rm.transpose(-1, -2) @ Rm
-        I = torch.eye(k, device=X.device, dtype=X.dtype).expand(R, k, k)
-        XtX_inv = torch.linalg.solve(XtX, I)
-        return beta, XtX, XtX_inv
-
-    Xt = X.transpose(1, 2)
-    XtX = Xt @ X
-    Xty = Xt @ y.unsqueeze(-1)
-
-    if solve_method == "solve":
-        beta = torch.linalg.solve(XtX, Xty).squeeze(-1)
-    elif solve_method == "lstsq":
-        beta = torch.linalg.lstsq(XtX, Xty).solution.squeeze(-1)
-    elif solve_method == "cholesky":
-        L = torch.linalg.cholesky(XtX)
-        beta = torch.cholesky_solve(Xty, L).squeeze(-1)
-    else:
-        raise ValueError(f"Unknown solve_method {solve_method}")
-
-    I = torch.eye(k, device=X.device, dtype=X.dtype).expand(R, k, k)
-    XtX_inv = torch.linalg.solve(XtX, I)
-    return beta, XtX, XtX_inv
 
 
 def WLS(
@@ -83,31 +37,20 @@ def WLS(
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[str, torch.device]] = None,
 ) -> OLSResults:
-    """Batched WLS for Monte Carlo replications.
+    """
+    Batched WLS for Monte Carlo replications.
 
-    The model is y = X beta + u, with weights proportional to precision:
-      w_i \\propto 1/Var(u_i | X)
+    weights are interpreted (by default) as precision weights:
+        w_i ∝ 1 / Var(u_i | X)
 
-    Implementation uses the transformed system:
-      sqrt(w_i) y_i = sqrt(w_i) x_i' beta + e_i
-
-    Inputs
-    - X: (R,n,k) or (n,k)
-    - y: (R,n) or (n,)
-    - weights: scalar, (n,), or (R,n)
-
-    vcov
-    - classic : homoskedastic in transformed equation
-    - HC0/HC1 : White robust on transformed equation
-    - cluster : cluster robust on transformed equation (requires clusters)
-    - HAC     : Newey-West on transformed equation
+    Internally solves the transformed system with sqrt(w).
     """
     X, y, param_names = as_batched_xy(X, y, dtype=dtype, device=device)
-
     R, n, k = X.shape
+
     df_resid = n - k
     if df_resid <= 0:
-        raise ValueError(f"Need n > k for WLS. Got n={n}, k={k} (df_resid={df_resid}).")
+        raise ShapeError(f"Need n > k for WLS. Got n={n}, k={k} (df_resid={df_resid}).")
 
     w, sqrt_w = as_batched_weights(
         weights,
@@ -120,15 +63,15 @@ def WLS(
     )
 
     Xw = X * sqrt_w.unsqueeze(-1)  # (R,n,k)
-    yw = y * sqrt_w               # (R,n)
+    yw = y * sqrt_w                # (R,n)
 
-    beta, XtX, XtX_inv = _solve_ls(Xw, yw, solve_method=solve_method)
+    beta, XtX, XtX_inv = solve_ls(Xw, yw, solve_method=solve_method)
 
     fitted = (X @ beta.unsqueeze(-1)).squeeze(-1)  # (R,n) fitted on original scale
-    resid = y - fitted                             # (R,n)
+    resid = y - fitted  # (R,n)
 
-    wrss = (w * resid * resid).sum(dim=1)          # (R,)
-    sigma2 = wrss / float(df_resid)                # (R,) (transformed equation)
+    wrss = (w * resid * resid).sum(dim=1)  # (R,)
+    sigma2 = wrss / float(df_resid)        # (R,) variance in transformed equation
 
     df_model = (k - 1) if has_const else k
     if df_model <= 0:
@@ -140,38 +83,32 @@ def WLS(
 
     if vcov_key == "CLASSIC":
         cov_type = "nonrobust"
-        vcov_mat = XtX_inv * sigma2.view(R, 1, 1)
+        vcov_mat = vcov_classic(XtX_inv, sigma2)
         default_use_t = True
-
     elif vcov_key == "HC0":
         cov_type = "HC0"
         vcov_mat = vcov_hc0(Xw, resid_w, XtX_inv)
         default_use_t = False
-
     elif vcov_key == "HC1":
         cov_type = "HC1"
         vcov_mat = vcov_hc1(Xw, resid_w, XtX_inv)
         default_use_t = False
-
     elif vcov_key == "CLUSTER":
         if clusters is None:
-            raise ValueError("vcov='cluster' requires clusters=(n,) labels")
+            raise ShapeError("vcov='cluster' requires clusters=(n,) labels")
         cov_type = "cluster"
         vcov_mat = vcov_cluster(Xw, resid_w, XtX_inv, clusters, correction=cluster_correction)
         default_use_t = False
-
     elif vcov_key == "HAC":
         cov_type = "HAC"
         vcov_mat = vcov_hac(Xw, resid_w, XtX_inv, max_lags=hac_max_lags, kernel=hac_kernel)
         default_use_t = False
-
     else:
-        raise ValueError("Unknown vcov. Use 'classic','HC0','HC1','cluster','HAC'.")
+        raise ShapeError("Unknown vcov. Use 'classic','HC0','HC1','cluster','HAC'.")
 
     if use_t is None:
         use_t = default_use_t
 
-    # Weight diagnostics
     wmin = float(w.min().detach().cpu().item())
     wmax = float(w.max().detach().cpu().item())
     wmean = float(w.mean().detach().cpu().item())
@@ -189,7 +126,6 @@ def WLS(
         "hac_kernel": hac_kernel if vcov_key == "HAC" else None,
     }
 
-    # Weighted R^2 (if y is stored)
     if store_y:
         ybar_w = (w * y).sum(dim=1) / w.sum(dim=1)
         tss_w = (w * (y - ybar_w.view(R, 1)) ** 2).sum(dim=1)
@@ -205,7 +141,7 @@ def WLS(
         params=beta,
         vcov=vcov_mat,
         sigma2=sigma2,
-        ssr=wrss,  # for WLS, ssr is *weighted* SSR
+        ssr=wrss,  # weighted SSR
         _nobs=n,
         df_resid=df_resid,
         df_model=df_model,

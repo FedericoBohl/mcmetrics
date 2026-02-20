@@ -1,4 +1,3 @@
-# src/mcmetrics/typing.py
 from __future__ import annotations
 
 from typing import Any, Optional, Sequence, Tuple, Union, TYPE_CHECKING
@@ -6,9 +5,10 @@ from typing import Any, Optional, Sequence, Tuple, Union, TYPE_CHECKING
 import numpy as np
 import torch
 
+from mcmetrics.exceptions import ShapeError, NotSupportedError
+
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
-
 
 ArrayLike = Union[torch.Tensor, np.ndarray, Sequence[Any]]
 
@@ -33,7 +33,9 @@ def _require_pandas() -> None:
     try:
         import pandas as _  # noqa: F401
     except Exception as e:
-        raise ImportError("pandas is required to pass DataFrame/Series inputs. Install with: pip install pandas") from e
+        raise NotSupportedError(
+            "pandas is required to pass DataFrame/Series inputs. Install with: pip install pandas"
+        ) from e
 
 
 def as_torch(
@@ -44,12 +46,7 @@ def as_torch(
 ) -> torch.Tensor:
     """
     Convert common array-likes to torch.Tensor.
-
-    Supports:
-    - torch.Tensor
-    - numpy.ndarray
-    - Python lists/tuples (nested)
-    - pandas.DataFrame / pandas.Series (if pandas installed)
+    Supports torch, numpy, lists, and pandas (if installed).
     """
     if _is_pandas_df(x) or _is_pandas_series(x):
         _require_pandas()
@@ -83,13 +80,7 @@ def as_batched_xy(
       X: (R,n,k)
       y: (R,n)
 
-    Accept:
-      X: (n,k) or (R,n,k)
-      y: (n,) or (R,n)
-
-    Extra feature:
-      If X is a pandas.DataFrame and it is a single-sample (2D) input,
-      return param_names = list(X.columns). Otherwise param_names=None.
+    Also returns param_names when X is a single-sample pandas.DataFrame.
     """
     param_names: Optional[list[str]] = None
 
@@ -104,10 +95,9 @@ def as_batched_xy(
         y = y.to_numpy()  # type: ignore[attr-defined]
     elif _is_pandas_df(y):
         _require_pandas()
-        # allow a single-column DataFrame as y
         y_np = y.to_numpy()  # type: ignore[attr-defined]
         if y_np.ndim != 2 or y_np.shape[1] != 1:
-            raise ValueError("If y is a DataFrame, it must have exactly one column.")
+            raise ShapeError("If y is a DataFrame, it must have exactly one column.")
         y = y_np[:, 0]
 
     Xt = as_torch(X, dtype=dtype, device=device)
@@ -119,13 +109,13 @@ def as_batched_xy(
         yt = yt.unsqueeze(0)
 
     if Xt.ndim != 3:
-        raise ValueError(f"X must be (R,n,k) or (n,k). Got {tuple(Xt.shape)}")
+        raise ShapeError(f"X must be (R,n,k) or (n,k). Got {tuple(Xt.shape)}")
     if yt.ndim != 2:
-        raise ValueError(f"y must be (R,n) or (n,). Got {tuple(yt.shape)}")
+        raise ShapeError(f"y must be (R,n) or (n,). Got {tuple(yt.shape)}")
     if Xt.shape[0] != yt.shape[0] or Xt.shape[1] != yt.shape[1]:
-        raise ValueError(f"Batch/obs dims mismatch: X {tuple(Xt.shape)}, y {tuple(yt.shape)}")
+        raise ShapeError(f"Batch/obs dims mismatch: X {tuple(Xt.shape)}, y {tuple(yt.shape)}")
 
-    # If user passed batched X (3D) we do not trust names even if they came from a DF
+    # If batched input (R>1) we do not trust column names even if origin was a DataFrame
     if Xt.shape[0] != 1:
         param_names = None
 
