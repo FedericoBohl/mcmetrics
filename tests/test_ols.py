@@ -3,6 +3,7 @@ import torch
 
 from mcmetrics import OLS
 
+
 def test_ols_shapes_and_consistency():
     torch.manual_seed(0)
     R, n, k = 10, 50, 3

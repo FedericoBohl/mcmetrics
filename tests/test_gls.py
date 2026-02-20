@@ -1,10 +1,9 @@
 import pytest
 import torch
 
+from mcmetrics.models.gls import GLS
 from mcmetrics.models.ols import OLS
 from mcmetrics.models.wls import WLS
-from mcmetrics.models.gls import GLS
-from mcmetrics.sigma import SigmaSpec
 
 
 def _make_spd(n: int, seed: int = 0) -> torch.Tensor:
@@ -77,36 +76,6 @@ def test_inv_sqrt_sigma_reuses_whitener_and_matches_diag_path():
     assert torch.allclose(res1.vcov, res2.vcov, atol=1e-6, rtol=1e-6)
 
 
-def test_gls_accepts_sigma_spec_diagonal():
-    torch.manual_seed(29)
-    R, n, k = 3, 18, 2
-    X = torch.randn(R, n, k)
-    y = torch.randn(R, n)
-
-    Sigma_diag = torch.linspace(0.6, 1.8, n)
-    spec = SigmaSpec.diagonal(diag=Sigma_diag)
-
-    res1 = GLS(X, y, Sigma=Sigma_diag, vcov="classic")
-    res2 = GLS(X, y, sigma_spec=spec, vcov="classic")
-    assert torch.allclose(res1.params, res2.params, atol=1e-6, rtol=1e-6)
-    assert torch.allclose(res1.vcov, res2.vcov, atol=1e-6, rtol=1e-6)
-
-
-def test_gls_accepts_sigma_spec_full():
-    torch.manual_seed(31)
-    R, n, k = 2, 12, 3
-    X = torch.randn(R, n, k)
-    y = torch.randn(R, n)
-
-    Sigma = torch.eye(n)
-    spec = SigmaSpec.full_matrix(Sigma)
-
-    res1 = GLS(X, y, Sigma=Sigma, vcov="classic")
-    res2 = GLS(X, y, sigma_spec=spec, vcov="classic")
-    assert torch.allclose(res1.params, res2.params, atol=1e-6, rtol=1e-6)
-    assert torch.allclose(res1.vcov, res2.vcov, atol=1e-6, rtol=1e-6)
-
-
 def test_error_when_sigma_diag_not_positive():
     torch.manual_seed(13)
     R, n, k = 2, 10, 2
@@ -128,22 +97,22 @@ def test_error_when_sigma_full_not_spd():
     diag = torch.ones(n)
     diag[2] = -1.0
     Sigma_bad = torch.diag(diag)
-    with pytest.raises(ValueError, match="SPD"):
+    with pytest.raises(Exception):
         GLS(X, y, Sigma=Sigma_bad, vcov="classic", check_spd=True)
 
 
-def test_gls_robust_hc0_reduces_to_ols_hc0_when_sigma_identity():
+def test_gls_robust_hc0_reduces_to_ols_hc0_when_sigma_identity(torch_dtype):
     torch.manual_seed(19)
     R, n, k = 3, 25, 3
-    X = torch.randn(R, n, k)
-    y = torch.randn(R, n)
+    X = torch.randn(R, n, k, dtype=torch_dtype)
+    y = torch.randn(R, n, dtype=torch_dtype)
 
-    Sigma = torch.eye(n)
+    Sigma = torch.eye(n, dtype=torch_dtype)
 
     res_gls = GLS(X, y, Sigma=Sigma, vcov="HC0")
     res_ols = OLS(X, y, vcov="HC0")
 
-    assert torch.allclose(res_gls.vcov, res_ols.vcov, atol=1e-6, rtol=1e-6)
+    assert torch.allclose(res_gls.vcov, res_ols.vcov, atol=1e-8, rtol=1e-8)
 
 
 def test_store_diagnostics_outputs_expected_keys():

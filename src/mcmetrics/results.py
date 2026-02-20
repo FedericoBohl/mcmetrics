@@ -90,14 +90,16 @@ class OLSResults:
 
     # Optionally stored (to save memory)
     fitted: Optional[torch.Tensor] = None  # (R,n) in original space if provided by model
-    resid: Optional[torch.Tensor] = None   # (R,n) residuals in original space if stored
+    resid: Optional[torch.Tensor] = None   # (R,n) residuals (model-dependent: may be whitened in GLS/FGLS)
     y: Optional[torch.Tensor] = None       # (R,n) original y if stored
+
+    # Optional: raw residuals in original space y - Xb (useful for GLS/FGLS)
+    resid_raw: Optional[torch.Tensor] = None  # (R,n)
 
     # Metadata (always available)
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    # Diagnostics produced by models (always available)
-    # Examples: GLS objective, logdet(Sigma), Gaussian log-likelihood, etc.
+    # Diagnostics (always available)
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     # User-facing labels
@@ -113,14 +115,17 @@ class OLSResults:
     # Monte Carlo truth (optional)
     beta_true: Optional[torch.Tensor] = None  # expected shape (k,) or broadcastable variants
 
-    # Extra diagnostics / model-specific info
-    extras: dict[str, Any] = field(default_factory=dict)
+    # Extra model-specific info
+    extras: Optional[dict[str, Any]] = field(default_factory=dict)
 
     def _ex(self) -> dict[str, Any]:
         return self.extras if isinstance(self.extras, dict) else {}
 
     def _md(self) -> dict[str, Any]:
         return self.metadata if isinstance(self.metadata, dict) else {}
+
+    def _dg(self) -> dict[str, Any]:
+        return self.diagnostics if isinstance(self.diagnostics, dict) else {}
 
     def predict(self, X_new: torch.Tensor, *, params: str = "replications") -> torch.Tensor:
         """Predict y given new design matrix X_new. See docstring in source for shapes."""
@@ -405,7 +410,9 @@ class OLSResults:
                 ax.axhline(-band, linestyle=":")
 
         else:
-            raise ValueError("kind must be one of {'params','resid','resid_hist','fitted_vs_actual','qq_resid','acf_resid'}")
+            raise ValueError(
+                "kind must be one of {'params','resid','resid_hist','fitted_vs_actual','qq_resid','acf_resid'}"
+            )
 
         if show:
             plt.show()
@@ -455,21 +462,17 @@ class OLSResults:
                     out[k] = v
             return out
 
-        md = self._md()
-        md_r: dict[str, Any] = {}
-        for k, v in md.items():
-            if isinstance(v, torch.Tensor) and v.ndim >= 1 and v.shape[0] == R:
-                md_r[k] = v[r : r + 1]
-            else:
-                md_r[k] = v
+        def _slice_dict_batch(d: dict[str, Any]) -> dict[str, Any]:
+            out: dict[str, Any] = {}
+            for kk, vv in d.items():
+                if isinstance(vv, torch.Tensor) and vv.ndim >= 1 and vv.shape[0] == R:
+                    out[kk] = vv[r : r + 1]
+                else:
+                    out[kk] = vv
+            return out
 
-        diag = self.diagnostics if isinstance(self.diagnostics, dict) else {}
-        diag_r: dict[str, Any] = {}
-        for k, v in diag.items():
-            if isinstance(v, torch.Tensor) and v.ndim >= 1 and v.shape[0] == R:
-                diag_r[k] = v[r : r + 1]
-            else:
-                diag_r[k] = v
+        md_r = _slice_dict_batch(self._md())
+        dg_r = _slice_dict_batch(self._dg())
 
         return OLSResults(
             params=self.params[r : r + 1],
@@ -483,8 +486,9 @@ class OLSResults:
             fitted=_slice_opt(self.fitted),
             resid=_slice_opt(self.resid),
             y=_slice_opt(self.y),
+            resid_raw=_slice_opt(self.resid_raw),
             metadata=md_r,
-            diagnostics=diag_r,
+            diagnostics=dg_r,
             model_name=self.model_name,
             method_name=self.method_name,
             cov_type=self.cov_type,
@@ -548,7 +552,12 @@ class OLSResults:
         """Rejection indicators for H0: beta = beta0. Returns (R,k) bool."""
         return self.pvalues_beta0(beta0, use_t=use_t) < alpha
 
-    def rejection_rate_beta0(self, beta0: torch.Tensor, alpha: float = 0.05, use_t: Optional[bool] = None) -> torch.Tensor:
+    def rejection_rate_beta0(
+        self,
+        beta0: torch.Tensor,
+        alpha: float = 0.05,
+        use_t: Optional[bool] = None,
+    ) -> torch.Tensor:
         """Rejection rates across replications for H0: beta = beta0. Returns (k,)."""
         return self.reject_beta0(beta0, alpha=alpha, use_t=use_t).to(self.params.dtype).mean(dim=0)
 

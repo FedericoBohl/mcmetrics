@@ -51,6 +51,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+exclude = ["mcmetrics/**", "build", "dist", ".venv", "venv", "__pycache__"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

@@ -1,54 +1,52 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Optional, Type
+from typing import Callable
+
+import torch
 
 from mcmetrics.exceptions import NotSupportedError
+from mcmetrics.sigma.estimators import GreeneDummiesDiagSigma, SigmaEstimator, WhiteDiagSigma
+
+_REGISTRY: dict[str, Callable[..., SigmaEstimator]] = {}
 
 
-class BaseSigmaEstimator:
-    """Base class for Sigma estimators used by FGLS.
-
-    Estimators should implement `fit(...)` and return a SigmaSpec.
-    """
-
-    name: str = "base"
-
-    def fit(self, *args, **kwargs):  # pragma: no cover
-        raise NotImplementedError
+def register_sigma_estimator(name: str, factory: Callable[..., SigmaEstimator]) -> None:
+    key = str(name).strip().lower()
+    if not key:
+        raise ValueError("Estimator name must be non-empty")
+    _REGISTRY[key] = factory
 
 
-_REGISTRY: dict[str, Type[BaseSigmaEstimator]] = {}
+def list_sigma_estimators() -> list[str]:
+    return sorted(_REGISTRY.keys())
 
 
-def register_sigma_estimator(name: str) -> Callable[[Type[BaseSigmaEstimator]], Type[BaseSigmaEstimator]]:
-    """Decorator to register a Sigma estimator class."""
-
-    def deco(cls: Type[BaseSigmaEstimator]) -> Type[BaseSigmaEstimator]:
-        key = str(name).strip().lower()
-        cls.name = key
-        _REGISTRY[key] = cls
-        return cls
-
-    return deco
-
-
-def get_sigma_estimator(name: str) -> Type[BaseSigmaEstimator]:
-    """Return the estimator class registered under `name`."""
+def get_sigma_estimator(name: str) -> Callable[..., SigmaEstimator]:
     key = str(name).strip().lower()
     if key not in _REGISTRY:
         raise NotSupportedError(
-            f"Unknown Sigma estimation method '{name}'. "
-            f"Available: {', '.join(sorted(_REGISTRY.keys())) or '(none)'}"
+            f"Unknown sigma estimator {name!r}. Available: {', '.join(list_sigma_estimators())}"
         )
     return _REGISTRY[key]
 
 
-def list_sigma_estimators() -> list[str]:
-    """List available Sigma estimation methods."""
-    return sorted(_REGISTRY.keys())
+# -----------------------------------------------------------------------------
+# Built-ins
+# -----------------------------------------------------------------------------
 
 
-# Register built-in estimators (minimal set; expands with FGLS work)
-from mcmetrics.sigma.estimators.identity import IdentitySigma  # noqa: E402,F401
-from mcmetrics.sigma.estimators.diag_resid2 import DiagResid2Sigma  # noqa: E402,F401
+def _white_factory(
+    *,
+    has_const: bool = True,
+    min_var: float = 1e-12,
+    solve_method: str = "cholesky",
+) -> SigmaEstimator:
+    return WhiteDiagSigma(has_const=has_const, min_var=min_var, solve_method=solve_method)
+
+
+def _greene_factory(groups: torch.Tensor, *, min_var: float = 1e-12) -> SigmaEstimator:
+    return GreeneDummiesDiagSigma(groups=groups, min_var=min_var)
+
+
+register_sigma_estimator("white", _white_factory)
+register_sigma_estimator("greene_dummies", _greene_factory)
