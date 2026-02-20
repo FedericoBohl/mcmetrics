@@ -75,7 +75,11 @@ def test_ols_solve_method_lstsq_close_to_solve(torch_dtype):
     res_solve = OLS(X, y, solve_method="solve")
     res_lstsq = OLS(X, y, solve_method="lstsq")
 
-    assert torch.max(torch.abs(res_solve.params - res_lstsq.params)).item() < 1e-8
+    # float32 has ~1e-7 precision; allow a looser tolerance than float64
+    if torch_dtype == torch.float32:
+        assert torch.allclose(res_solve.params, res_lstsq.params, rtol=1e-5, atol=1e-6)
+    else:
+        assert torch.allclose(res_solve.params, res_lstsq.params, rtol=1e-10, atol=1e-10)
 
 
 def test_ols_vcov_defaults_use_t(torch_dtype):
