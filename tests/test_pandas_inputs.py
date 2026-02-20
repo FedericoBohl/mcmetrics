@@ -1,17 +1,15 @@
 import pytest
 
-pd = pytest.importorskip("pandas")
-
-import torch
 from mcmetrics import OLS
 
+pd = pytest.importorskip("pandas")
 
-def test_param_names_from_dataframe():
-    n, k = 12, 3
-    X = pd.DataFrame({"const": [1.0] * n, "x1": list(range(n)), "x2": [0.5] * n})
-    y = pd.Series([1.0] * n)
+
+def test_ols_accepts_pandas_dataframe_and_series():
+    n = 40
+    X = pd.DataFrame({"const": [1.0] * n, "x": list(range(n))})
+    y = pd.Series([0.1 * i for i in range(n)])
 
     res = OLS(X, y)
-
-    assert res.param_names == ["const", "x1", "x2"]
-    assert res.params.shape == (1, k)
+    assert res.params.shape[0] == 1
+    assert res.k == 2

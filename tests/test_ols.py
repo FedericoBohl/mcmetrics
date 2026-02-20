@@ -1,5 +1,5 @@
-import torch
 import pytest
+import torch
 
 from mcmetrics import OLS
 
@@ -10,9 +10,8 @@ def test_ols_accepts_single_sample_and_returns_batched(torch_dtype):
     Xb[:, :, 0] = 1.0
     yb = torch.randn((R, n), dtype=torch_dtype)
 
-    X = Xb[0]       # (n,k)
-    y = yb[0]       # (n,)
-
+    X = Xb[0]  # (n,k)
+    y = yb[0]  # (n,)
     res = OLS(X, y)
 
     assert res.params.shape == (1, k)
@@ -23,7 +22,6 @@ def test_ols_accepts_single_sample_and_returns_batched(torch_dtype):
     assert res.R == 1
     assert res.k == k
 
-    # Memory-light defaults
     assert res.y is not None
     assert res.y.shape == (1, n)
     assert res.fitted is None
@@ -37,7 +35,6 @@ def test_ols_batched_shapes_and_df(torch_dtype):
     y = torch.randn((R, n), dtype=torch_dtype)
 
     res = OLS(X, y, has_const=True)
-
     assert res.params.shape == (R, k)
     assert res.vcov.shape == (R, k, k)
     assert res.sigma2.shape == (R,)
@@ -47,14 +44,15 @@ def test_ols_batched_shapes_and_df(torch_dtype):
 
 
 def test_ols_matches_direct_solve(torch_dtype):
-    # Check that OLS() matches the explicit batched normal equations solution.
     R, n, k = 3, 40, 3
     g = torch.Generator().manual_seed(7)
 
     X = torch.randn((R, n, k), generator=g, dtype=torch_dtype)
     X[:, :, 0] = 1.0
     beta_true = torch.tensor([0.5, -0.25, 0.1], dtype=torch_dtype)
-    y = (X @ beta_true.view(1, k, 1)).squeeze(-1) + 0.05 * torch.randn((R, n), generator=g, dtype=torch_dtype)
+
+    noise = 0.05 * torch.randn((R, n), generator=g, dtype=torch_dtype)
+    y = (X @ beta_true.view(1, k, 1)).squeeze(-1) + noise
 
     res = OLS(X, y, solve_method="solve")
 
@@ -77,7 +75,6 @@ def test_ols_solve_method_lstsq_close_to_solve(torch_dtype):
     res_solve = OLS(X, y, solve_method="solve")
     res_lstsq = OLS(X, y, solve_method="lstsq")
 
-    # With full rank XtX, both should coincide closely.
     assert torch.max(torch.abs(res_solve.params - res_lstsq.params)).item() < 1e-8
 
 

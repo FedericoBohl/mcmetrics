@@ -30,7 +30,10 @@ def _require_pandas() -> None:
     try:
         import pandas as _  # noqa: F401
     except Exception as e:
-        raise NotSupportedError("pandas is required to pass DataFrame/Series inputs. Install with: pip install pandas") from e
+        raise NotSupportedError(
+            "pandas is required to pass DataFrame/Series inputs. "
+            "Install with: pip install pandas"
+        ) from e
 
 
 def as_torch(
