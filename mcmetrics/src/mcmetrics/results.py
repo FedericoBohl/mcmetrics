@@ -1,7 +1,7 @@
 # src/mcmetrics/results.py
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional, Sequence
 
@@ -96,10 +96,6 @@ class OLSResults:
     # Metadata (always available)
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    # Diagnostics produced by models (always available)
-    # Examples: GLS objective, logdet(Sigma), Gaussian log-likelihood, etc.
-    diagnostics: dict[str, Any] = field(default_factory=dict)
-
     # User-facing labels
     model_name: str = "OLS"
     method_name: str = "Least Squares"
@@ -114,7 +110,7 @@ class OLSResults:
     beta_true: Optional[torch.Tensor] = None  # expected shape (k,) or broadcastable variants
 
     # Extra diagnostics / model-specific info
-    extras: dict[str, Any] = field(default_factory=dict)
+    extras: Optional[dict[str, Any]] = field(default_factory=dict)
 
     def _ex(self) -> dict[str, Any]:
         return self.extras if isinstance(self.extras, dict) else {}
@@ -463,14 +459,6 @@ class OLSResults:
             else:
                 md_r[k] = v
 
-        diag = self.diagnostics if isinstance(self.diagnostics, dict) else {}
-        diag_r: dict[str, Any] = {}
-        for k, v in diag.items():
-            if isinstance(v, torch.Tensor) and v.ndim >= 1 and v.shape[0] == R:
-                diag_r[k] = v[r : r + 1]
-            else:
-                diag_r[k] = v
-
         return OLSResults(
             params=self.params[r : r + 1],
             vcov=self.vcov[r : r + 1],
@@ -484,7 +472,6 @@ class OLSResults:
             resid=_slice_opt(self.resid),
             y=_slice_opt(self.y),
             metadata=md_r,
-            diagnostics=diag_r,
             model_name=self.model_name,
             method_name=self.method_name,
             cov_type=self.cov_type,

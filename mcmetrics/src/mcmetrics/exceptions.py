@@ -17,9 +17,5 @@ class SingularMatrixError(MCmetricsError, RuntimeError):
     """Matrix is singular or numerically non-invertible."""
 
 
-class NotSPDMatrixError(MCmetricsError, ValueError):
-    """Matrix must be symmetric positive definite (SPD)."""
-
-
 class NotSupportedError(MCmetricsError, NotImplementedError):
     """Feature is not supported."""

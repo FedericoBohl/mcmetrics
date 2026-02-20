@@ -9,6 +9,7 @@ build/
 
 # Virtual env
 .venv/
+.env
 venv/
 
 # Jupyter
